@@ -1,0 +1,94 @@
+/* ──────────────────────────────────────────────────────────────
+   Global Styles — Bulk Email Dispatch Platform
+   ────────────────────────────────────────────────────────────── */
+
+/* ── Google Fonts: Inter (300–800) ──────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Shadcn/UI CSS Custom Properties (Light Mode Only) ──────── */
+@layer base {
+  :root {
+    /* Background & Foreground */
+    --background: 222 47% 4%;        /* slate-950 */
+    --foreground: 210 40% 98%;       /* slate-50 */
+
+    /* Card */
+    --card: 222 47% 7%;              /* slightly lighter than bg */
+    --card-foreground: 210 40% 98%;
+
+    /* Popover */
+    --popover: 222 47% 7%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary — Indigo */
+    --primary: 239 84% 67%;          /* indigo-400 */
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary */
+    --secondary: 217 33% 17%;        /* slate-800 */
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted */
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    /* Accent */
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+
+    /* Destructive — Rose */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    /* Borders & Inputs */
+    --border: 217 33% 17%;
+    --input: 217 33% 20%;
+    --ring: 239 84% 67%;             /* indigo-400 */
+
+    /* Radius */
+    --radius: 0.75rem;
+  }
+}
+
+/* ── Base Resets ────────────────────────────────────────────── */
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+
+  /* Remove default focus outline, replace with ring */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+/* ── Utility Enhancements ──────────────────────────────────── */
+@layer utilities {
+  /* Custom scrollbar for dark theme */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-neutral-700 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-600;
+  }
+}

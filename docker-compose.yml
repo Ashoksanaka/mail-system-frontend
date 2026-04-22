@@ -1,0 +1,20 @@
+# ──────────────────────────────────────────────────────────────
+# Docker Compose — Bulk Email Dispatch Platform (Frontend)
+# Services: frontend
+# ──────────────────────────────────────────────────────────────
+
+services:
+  # ── React Frontend (Nginx) ──────────────────────────────
+  frontend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    networks:
+      - mail_system_net
+
+# ── Networks ─────────────────────────────────────────────────
+networks:
+  mail_system_net:
+    name: mail_system_net
+    external: true
