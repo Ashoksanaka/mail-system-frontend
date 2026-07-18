@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/react";
 import ReconnectingWebSocket from "reconnecting-websocket";
+import { resolveEndpoints } from "../lib/endpoints";
 
 /**
  * Custom hook for managing a WebSocket connection to dispatch job updates.
@@ -37,10 +38,15 @@ export const useDispatchWebSocket = (jobId, onMessage) => {
       return;
     }
 
-    const wsBaseUrl =
-      import.meta.env.VITE_WS_BASE_URL ||
-      `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}`;
-    const wsUrl = `${wsBaseUrl}/ws/dispatch/${jobId}/`;
+    let wsUrl;
+    try {
+      const { wsBaseUrl } = resolveEndpoints();
+      wsUrl = `${wsBaseUrl}/ws/dispatch/${jobId}/`;
+    } catch (err) {
+      console.error("[WebSocket] Invalid endpoint configuration:", err);
+      setConnectionStatus("disconnected");
+      return;
+    }
 
     closedByUsRef.current = false;
     setConnectionStatus("connecting");

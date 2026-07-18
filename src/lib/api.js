@@ -3,10 +3,13 @@
 // ──────────────────────────────────────────────────────────────
 import axios from "axios";
 import { getAuthToken } from "./authToken";
+import { resolveEndpoints } from "./endpoints";
+
+const { apiBaseUrl } = resolveEndpoints();
 
 // ── Create Axios instance ─────────────────────────────────────
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || "",
+  baseURL: apiBaseUrl || "",
   timeout: 30000,
   headers: {
     "Content-Type": "application/json",
