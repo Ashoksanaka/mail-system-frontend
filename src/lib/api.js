@@ -2,6 +2,7 @@
 // Axios API Client — Bulk Email Dispatch Platform
 // ──────────────────────────────────────────────────────────────
 import axios from "axios";
+import { getAuthToken } from "./authToken";
 
 // ── Create Axios instance ─────────────────────────────────────
 const api = axios.create({
@@ -14,8 +15,13 @@ const api = axios.create({
 
 // ── Request Interceptor ───────────────────────────────────────
 api.interceptors.request.use(
-  (config) => {
-    // Log requests in development mode
+  async (config) => {
+    const token = await getAuthToken();
+    if (token) {
+      config.headers = config.headers || {};
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+
     if (import.meta.env.DEV) {
       console.log(`[API] ${config.method?.toUpperCase()} ${config.url}`);
     }
@@ -28,16 +34,18 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Normalize error object for consistent handling across the app
+    const status = error.response?.status || 500;
     const message =
       error.response?.data?.error ||
       error.response?.data?.detail ||
-      error.message ||
+      (status === 401
+        ? "Authentication required. Please sign in again."
+        : error.message) ||
       "An unexpected error occurred";
 
     const normalizedError = {
       message,
-      status: error.response?.status || 500,
+      status,
       data: error.response?.data || null,
     };
 
@@ -117,5 +125,16 @@ export const startDispatch = (templateId, file, globalFiles = {}, perRowFiles = 
 /** Get dispatch job status and logs */
 export const getJobStatus = (jobId) =>
   api.get(`/api/dispatch/jobs/${jobId}/`);
+
+// ──────────────────────────────────────────────────────────────
+// Account / SMTP Settings
+// ──────────────────────────────────────────────────────────────
+
+/** Fetch immutable sender email + whether an app password is saved */
+export const getSmtpSettings = () => api.get("/api/account/smtp/");
+
+/** Save or replace the Gmail app password (write-only) */
+export const updateSmtpSettings = (appPassword) =>
+  api.put("/api/account/smtp/", { app_password: appPassword });
 
 export default api;

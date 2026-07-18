@@ -1,6 +1,3 @@
-// ──────────────────────────────────────────────────────────────
-// Vite Configuration — Bulk Email Dispatch Platform
-// ──────────────────────────────────────────────────────────────
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -13,8 +10,6 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
-    // Proxy API and WebSocket requests to Django backend during development
     proxy: {
       "/api": {
         target: "http://localhost:8000",
@@ -25,5 +20,9 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.js"],
   },
 });

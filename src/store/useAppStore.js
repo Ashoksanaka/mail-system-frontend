@@ -34,6 +34,10 @@ const useAppStore = create(
       activeJobId: null,
       setActiveJobId: (id) => set({ activeJobId: id }),
 
+      // Prevents duplicate POST /dispatch/start/ (React Strict Mode remounts)
+      dispatchStartInFlight: false,
+      setDispatchStartInFlight: (value) => set({ dispatchStartInFlight: value }),
+
       // Real-time status object received from WebSocket
       dispatchStatus: null,
       setDispatchStatus: (status) => set({ dispatchStatus: status }),
@@ -48,6 +52,7 @@ const useAppStore = create(
           globalFiles: {},
           perRowFiles: {},
           activeJobId: null,
+          dispatchStartInFlight: false,
           dispatchStatus: null,
         }),
     }),

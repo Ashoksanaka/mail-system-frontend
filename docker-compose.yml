@@ -6,10 +6,15 @@
 services:
   # ── React Frontend (Nginx) ──────────────────────────────
   frontend:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_WS_BASE_URL: ${VITE_WS_BASE_URL:-}
+        VITE_CLERK_PUBLISHABLE_KEY: ${VITE_CLERK_PUBLISHABLE_KEY}
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3000:8080"
     networks:
       - mail_system_net
 

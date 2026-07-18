@@ -31,7 +31,7 @@ export const templateSchema = z.object({
     .string()
     .min(1, "Template body is required")
     .refine(
-      (val) => /\{\{[^{}]+\}\}/.test(val),
+      (val) => /\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}/.test(val),
       "Template must contain at least one {{placeholder}}"
     ),
 });

@@ -3,6 +3,7 @@
 // ──────────────────────────────────────────────────────────────
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
+import { Show, useAuth } from "@clerk/react";
 import {
   FileText,
   Download,
@@ -116,6 +117,9 @@ const techStack = [
 // ══════════════════════════════════════════════════════════════
 export default function HomePage() {
   const navigate = useNavigate();
+  const { isSignedIn } = useAuth();
+
+  const goToApp = () => navigate(isSignedIn ? "/templates" : "/sign-in");
 
   return (
     <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-8">
@@ -191,7 +195,7 @@ export default function HomePage() {
             className="text-5xl sm:text-6xl md:text-7xl font-extrabold tracking-tight text-white mb-6"
           >
             <span className="bg-gradient-to-r from-indigo-400 via-violet-400 to-indigo-300 bg-clip-text text-transparent">
-              MailBlast
+              Mail Blast
             </span>
           </motion.h1>
 
@@ -215,17 +219,18 @@ export default function HomePage() {
             <Button
               id="hero-cta-get-started"
               size="lg"
-              onClick={() => navigate("/templates")}
+              onClick={goToApp}
               className="bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-xl px-8 py-3 text-base font-semibold shadow-lg shadow-indigo-500/25 transition-all duration-300 hover:shadow-indigo-500/40 hover:scale-[1.02]"
             >
-              Get Started
+              <Show when="signed-in">Open Templates</Show>
+              <Show when="signed-out">Get Started</Show>
               <ArrowRight className="w-4 h-4 ml-1" />
             </Button>
             <Button
               id="hero-cta-view-templates"
               size="lg"
               variant="outline"
-              onClick={() => navigate("/templates")}
+              onClick={goToApp}
               className="rounded-xl px-8 py-3 text-base font-semibold border-slate-600 text-slate-300 hover:bg-white/5 hover:border-slate-500 transition-all duration-300"
             >
               View Templates
@@ -379,7 +384,7 @@ export default function HomePage() {
             </div>
 
             <p className="text-xs text-slate-600">
-              © {new Date().getFullYear()} MailBlast — Bulk Email Dispatch Platform
+              © {new Date().getFullYear()} Mail Blast
             </p>
           </motion.div>
         </div>

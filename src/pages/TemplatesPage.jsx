@@ -112,16 +112,18 @@ export default function TemplatesPage() {
     return () => clearTimeout(handler);
   }, [bodyValue, subjectValue]);
 
-  // ── Live Placeholder Detection ──────────────────────────────
+  // ── Live Placeholder Detection (underscore-style names only) ─
   const detectedPlaceholders = useMemo(() => {
     const combinedText = `${debouncedSubjectValue || ""} ${debouncedBodyValue || ""}`;
     if (!combinedText.trim()) return [];
-    const matches = combinedText.match(/\{\{(\s*\w+\s*)\}\}/g);
+    const matches = combinedText.match(/\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g);
     if (!matches) return [];
-    // Extract names, strip whitespace, deduplicate preserving order
-    const names = matches.map((m) => m.replace(/\{\{|\}\}/g, "").trim());
+    // Extract names, strip outer whitespace, dedupe
+    const names = matches
+      .map((m) => m.replace(/^\{\{\s*|\s*\}\}$/g, "").trim())
+      .filter(Boolean);
     return [...new Map(names.map((n) => [n, n])).values()];
-  }, [debouncedBodyValue]);
+  }, [debouncedBodyValue, debouncedSubjectValue]);
 
   // ── Select Template for Editing ─────────────────────────────
   const handleSelectTemplate = async (template) => {
@@ -591,9 +593,34 @@ export default function TemplatesPage() {
                     >
                       Template Body
                     </label>
+                    <div className="mb-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-amber-200/90 text-xs leading-relaxed">
+                      <p className="font-semibold text-amber-300 mb-1.5">
+                        Placeholder rules (required)
+                      </p>
+                      <ul className="list-disc list-inside space-y-1 text-amber-200/80">
+                        <li>
+                          Use double braces only:{" "}
+                          <code className="text-amber-100">{"{{Name}}"}</code>
+                        </li>
+                        <li>
+                          Multi-word names use underscores:{" "}
+                          <code className="text-amber-100">
+                            {"{{Your_Contact_Info}}"}
+                          </code>
+                        </li>
+                        <li>
+                          CSV column headers must match the placeholder text
+                          exactly
+                        </li>
+                        <li>
+                          The body must include at least one placeholder before
+                          saving
+                        </li>
+                      </ul>
+                    </div>
                     <Textarea
                       id="template-body"
-                      placeholder={`Dear {{name}},\n\nYour order {{order_id}} has been confirmed.\n\nThank you for your purchase!`}
+                      placeholder={`Dear {{name}},\n\nYour order {{order_id}} has been confirmed.\nContact: {{Your_Contact_Info}}\n\nThank you for your purchase!`}
                       rows={14}
                       {...register("body")}
                       className="bg-white/[0.04] border-white/[0.1] text-white placeholder:text-slate-500 focus:border-indigo-500/50 font-mono text-sm leading-relaxed resize-none"

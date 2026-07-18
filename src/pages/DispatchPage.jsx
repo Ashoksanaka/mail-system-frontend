@@ -21,7 +21,56 @@ import PageHeader from "../components/PageHeader";
 import { Progress } from "../components/ui/progress";
 import useAppStore from "../store/useAppStore";
 import { useDispatchWebSocket } from "../hooks/useWebSocket";
-import { startDispatch, getJobStatus } from "../lib/api";
+import { startDispatch, getJobStatus, getSmtpSettings } from "../lib/api";
+
+/** Short user-facing copy; never surface raw backend exception text. */
+const USER_DISPATCH_ERRORS = {
+  smtpSetup: "Add your Gmail app password in Settings before starting a dispatch.",
+  startFailed: "Could not start dispatch. Please try again.",
+  jobFailed: "Dispatch failed. Please try again.",
+  recipientFailed: "Email could not be sent.",
+  noJob: "No active dispatch job found. Please start from Upload CSV.",
+};
+
+/** Allow only known short public messages from the API; otherwise use fallback. */
+function toUserError(message, fallback) {
+  if (!message || typeof message !== "string") return fallback;
+  const trimmed = message.trim();
+  const allowed = new Set([
+    USER_DISPATCH_ERRORS.smtpSetup,
+    USER_DISPATCH_ERRORS.startFailed,
+    USER_DISPATCH_ERRORS.jobFailed,
+    USER_DISPATCH_ERRORS.recipientFailed,
+    USER_DISPATCH_ERRORS.noJob,
+    "SMTP authentication failed. Check your email settings.",
+    "Email service is temporarily unavailable. Please try again.",
+    "Email could not be sent.",
+    "Dispatch failed. Please try again.",
+    "Failed to queue dispatch task.",
+    "Failed to queue dispatch task. Please try again.",
+    "A dispatch job is already in progress. Please wait.",
+    "Gmail app password is not configured. Add it under Settings before starting a dispatch.",
+    "template_id is required.",
+    "Invalid template_id format.",
+    "csv_file is required.",
+    "Template not found.",
+    "CSV must have at least 1 data row.",
+    "CSV file encoding is not valid UTF-8.",
+  ]);
+  if (allowed.has(trimmed)) return trimmed;
+  // Known SMTP-setup phrasing from API / older responses
+  if (/app password|Settings|SMTP/i.test(trimmed) && trimmed.length < 160) {
+    return USER_DISPATCH_ERRORS.smtpSetup;
+  }
+  // Short, non-technical API messages (no stack/errno text)
+  if (
+    trimmed.length <= 120 &&
+    !/Errno|Traceback|Exception|smtp\.gmail|Timed out|timed out/i.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  return fallback;
+}
 
 // ── Components ─────────────────────────────────────────────────
 
@@ -102,8 +151,12 @@ const LogItem = React.memo(function LogItem({ log, idx }) {
         )}
       </div>
       <div className="text-xs text-slate-500">{log.sent_at}</div>
-      <div className="text-xs text-rose-400 truncate" title={log.error || ""}>
-        {log.error || <span className="text-slate-600">—</span>}
+      <div className="text-xs text-rose-400 truncate">
+        {log.status === "FAILED" ? (
+          USER_DISPATCH_ERRORS.recipientFailed
+        ) : (
+          <span className="text-slate-600">—</span>
+        )}
       </div>
     </motion.div>
   );
@@ -117,6 +170,7 @@ export default function DispatchPage() {
   // ── Zustand State ──────────────────────────────────────────
   const activeJobId = useAppStore((s) => s.activeJobId);
   const setActiveJobId = useAppStore((s) => s.setActiveJobId);
+  const setDispatchStartInFlight = useAppStore((s) => s.setDispatchStartInFlight);
   const selectedTemplate = useAppStore((s) => s.selectedTemplate);
   const uploadedFile = useAppStore((s) => s.uploadedFile);
   const globalFiles = useAppStore((s) => s.globalFiles);
@@ -125,6 +179,7 @@ export default function DispatchPage() {
 
   // ── Local State ────────────────────────────────────────────
   const [initError, setInitError] = useState(null);
+  const [needsSmtpSetup, setNeedsSmtpSetup] = useState(false);
   const [isInitializing, setIsInitializing] = useState(!activeJobId && !!uploadedFile);
   const [hasCompleted, setHasCompleted] = useState(false);
   
@@ -134,38 +189,85 @@ export default function DispatchPage() {
     failed: 0,
     pending: 0,
     job_status: "PENDING", // PENDING | IN_PROGRESS | COMPLETED | FAILED
+    error_message: "",
     logs: [],
   });
+  const syncSeqRef = useRef(0);
 
   // ── 1. Initialization Sequence ──────────────────────────────
   useEffect(() => {
     let mounted = true;
 
+    const applyStartedJob = (jobId, totalRecipients) => {
+      // Always persist job id (even after Strict Mode unmount) so remount resumes
+      setActiveJobId(jobId);
+      setDispatchStartInFlight(false);
+      setDispatchState((prev) => ({
+        ...prev,
+        total: totalRecipients || prev.total,
+        pending: totalRecipients || prev.pending,
+      }));
+      setIsInitializing(false);
+    };
+
     const initDispatch = async () => {
       // Case A: Missing context entirely
       if (!activeJobId && !uploadedFile) {
-        setInitError("No active dispatch job found. Please start from Upload CSV.");
+        setInitError(USER_DISPATCH_ERRORS.noJob);
         return;
       }
 
       // Case B: Fresh start from UploadCSVPage
       if (!activeJobId && uploadedFile && selectedTemplate) {
+        // Read lock from store (not deps) so setting it does not re-trigger this effect
+        if (useAppStore.getState().dispatchStartInFlight) {
+          return;
+        }
+
+        setDispatchStartInFlight(true);
         try {
           setIsInitializing(true);
-          const response = await startDispatch(selectedTemplate.id, uploadedFile, globalFiles, perRowFiles);
-          
-          if (mounted) {
-            setActiveJobId(response.data.job_id);
-            setDispatchState(prev => ({
-              ...prev,
-              total: response.data.total_recipients,
-              pending: response.data.total_recipients,
-            }));
-            setIsInitializing(false);
+          const smtp = await getSmtpSettings();
+          if (!smtp.data?.has_app_password) {
+            setDispatchStartInFlight(false);
+            if (mounted) {
+              setNeedsSmtpSetup(true);
+              setInitError(USER_DISPATCH_ERRORS.smtpSetup);
+              setIsInitializing(false);
+            }
+            return;
           }
+
+          const response = await startDispatch(
+            selectedTemplate.id,
+            uploadedFile,
+            globalFiles,
+            perRowFiles
+          );
+
+          applyStartedJob(
+            response.data.job_id,
+            response.data.total_recipients
+          );
         } catch (err) {
+          // Concurrent start (Strict Mode / double navigate): resume existing job
+          if (err.status === 429 && err.data?.job_id) {
+            applyStartedJob(err.data.job_id, err.data.total_recipients || 0);
+            return;
+          }
+
+          setDispatchStartInFlight(false);
           if (mounted) {
-            setInitError(err.message || "Failed to start dispatch job");
+            console.error("Failed to start dispatch job:", err);
+            const safeMessage = toUserError(
+              err.message,
+              USER_DISPATCH_ERRORS.startFailed
+            );
+            setNeedsSmtpSetup(
+              safeMessage === USER_DISPATCH_ERRORS.smtpSetup ||
+                /app password|Settings|SMTP/i.test(err.message || "")
+            );
+            setInitError(safeMessage);
             setIsInitializing(false);
           }
         }
@@ -174,72 +276,116 @@ export default function DispatchPage() {
 
     initDispatch();
     return () => { mounted = false; };
-  }, [activeJobId, uploadedFile, selectedTemplate, setActiveJobId]);
+  }, [
+    activeJobId,
+    uploadedFile,
+    selectedTemplate,
+    setActiveJobId,
+    setDispatchStartInFlight,
+    globalFiles,
+    perRowFiles,
+  ]);
+
+  // Strict Mode remount: clear initializing once a job id exists in the store
+  useEffect(() => {
+    if (activeJobId) {
+      setIsInitializing(false);
+    }
+  }, [activeJobId]);
 
   // ── 2. WebSocket Connection & Handler ────────────────────────
   const handleWsMessage = (data) => {
-    setDispatchState(prev => {
-      // Append new log if present
+    if (data.job_status === "COMPLETED" || data.job_status === "FAILED") {
+      setHasCompleted(true);
+    }
+
+    setDispatchState((prev) => {
       const newLogs = [...prev.logs];
       if (data.last_recipient) {
         newLogs.push({
           ...data.last_recipient,
-          sent_at: new Date().toLocaleTimeString('en-US', { hour12: false }),
-          id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+          sent_at: new Date().toLocaleTimeString("en-US", { hour12: false }),
+          id: `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
         });
-      }
-
-      // Check for completion
-      if (data.job_status === "COMPLETED" || data.job_status === "FAILED") {
-        setHasCompleted(true);
       }
 
       return {
         total: data.total,
         sent: data.sent,
         failed: data.failed,
-        pending: data.pending,
+        pending:
+          data.job_status === "FAILED" || data.job_status === "COMPLETED"
+            ? 0
+            : data.pending,
         job_status: data.job_status,
+        error_message: toUserError(
+          data.error ||
+            (data.job_status === "FAILED" ? prev.error_message : "") ||
+            prev.error_message,
+          data.job_status === "FAILED" ? USER_DISPATCH_ERRORS.jobFailed : ""
+        ),
         logs: newLogs,
       };
     });
   };
 
-  const { connectionStatus } = useDispatchWebSocket(activeJobId, handleWsMessage);
+  const { connectionStatus, hasConnectedOnce } = useDispatchWebSocket(
+    activeJobId,
+    handleWsMessage
+  );
 
   // ── 3. Handle Reconnection / Sync ────────────────────────────
   useEffect(() => {
-    // If we reconnect, fetch the latest state from REST API to fill any gaps
-    if (connectionStatus === "connected" && activeJobId) {
-      getJobStatus(activeJobId).then(response => {
+    if (connectionStatus !== "connected" || !activeJobId) return;
+
+    const seq = ++syncSeqRef.current;
+    const jobIdAtRequest = activeJobId;
+
+    getJobStatus(jobIdAtRequest)
+      .then((response) => {
+        if (syncSeqRef.current !== seq) return;
+        if (useAppStore.getState().activeJobId !== jobIdAtRequest) return;
+
         const { job, logs } = response.data;
-        
-        // Transform logs to match WS schema
-        const formattedLogs = logs.map(l => ({
+        if (String(job.id) !== String(jobIdAtRequest)) return;
+
+        const formattedLogs = logs.map((l) => ({
           id: l.id,
           name: l.recipient_name,
           email: l.recipient_email,
           status: l.status,
-          error: l.error_message,
-          sent_at: new Date(l.sent_at).toLocaleTimeString('en-US', { hour12: false })
+          error:
+            l.status === "FAILED"
+              ? USER_DISPATCH_ERRORS.recipientFailed
+              : "",
+          sent_at: new Date(l.sent_at).toLocaleTimeString("en-US", {
+            hour12: false,
+          }),
         }));
 
         setDispatchState({
           total: job.total_recipients,
           sent: job.sent_count,
           failed: job.failed_count,
-          pending: job.total_recipients - job.sent_count - job.failed_count,
+          pending:
+            job.status === "FAILED" || job.status === "COMPLETED"
+              ? 0
+              : job.total_recipients - job.sent_count - job.failed_count,
           job_status: job.status,
+          error_message: toUserError(
+            job.error_message,
+            job.status === "FAILED" ? USER_DISPATCH_ERRORS.jobFailed : ""
+          ),
           logs: formattedLogs,
         });
 
         if (job.status === "COMPLETED" || job.status === "FAILED") {
           setHasCompleted(true);
         }
-      }).catch(err => {
+      })
+      .catch((err) => {
         console.error("Failed to sync job status on reconnect:", err);
       });
-    }
   }, [connectionStatus, activeJobId]);
 
   // ── 4. Auto-scroll Logs ─────────────────────────────────────
@@ -250,9 +396,16 @@ export default function DispatchPage() {
     }
   }, [dispatchState.logs.length]);
 
-  const { total, sent, failed, pending, job_status, logs } = dispatchState;
+  const { total, sent, failed, pending, job_status, error_message, logs } =
+    dispatchState;
   const progressPercent = total > 0 ? Math.round(((sent + failed) / total) * 100) : 0;
-  
+  const isTerminal =
+    job_status === "COMPLETED" || job_status === "FAILED";
+  const isFullSuccess =
+    job_status === "COMPLETED" && failed === 0 && sent > 0;
+  const isHardFailure =
+    job_status === "FAILED" || (job_status === "COMPLETED" && sent === 0);
+
   // Recharts Data
   const chartData = useMemo(() => [
     { name: "Sent", value: sent, color: "#10b981" }, // Emerald
@@ -278,13 +431,23 @@ export default function DispatchPage() {
           </div>
           <h2 className="text-2xl font-bold mb-4">Cannot Start Dispatch</h2>
           <p className="text-slate-400 mb-8">{initError}</p>
-          <Link 
-            to="/upload-csv"
-            className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Upload CSV
-          </Link>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            {needsSmtpSetup && (
+              <Link
+                to="/settings"
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+              >
+                Open Settings
+              </Link>
+            )}
+            <Link
+              to="/upload-csv"
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Upload CSV
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -302,13 +465,28 @@ export default function DispatchPage() {
 
   const getStatusDot = () => {
     switch (connectionStatus) {
-      case "connected": 
-        return <div className="flex items-center gap-2 text-xs font-medium text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full"><div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />Live</div>;
+      case "connected":
+        return (
+          <div className="flex items-center gap-2 text-xs font-medium text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-full">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            Live
+          </div>
+        );
       case "connecting":
-        return <div className="flex items-center gap-2 text-xs font-medium text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full"><div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />Reconnecting...</div>;
+        return (
+          <div className="flex items-center gap-2 text-xs font-medium text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-full">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            {hasConnectedOnce ? "Reconnecting..." : "Connecting..."}
+          </div>
+        );
       case "disconnected":
       default:
-        return <div className="flex items-center gap-2 text-xs font-medium text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-full"><div className="w-2 h-2 rounded-full bg-rose-500" />Disconnected</div>;
+        return (
+          <div className="flex items-center gap-2 text-xs font-medium text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-full">
+            <div className="w-2 h-2 rounded-full bg-rose-500" />
+            Disconnected
+          </div>
+        );
     }
   };
 
@@ -454,9 +632,27 @@ export default function DispatchPage() {
           {/* Scrolling Body */}
           <div className="flex-1 overflow-y-auto scrollbar-thin p-2">
             {logs.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3">
-                <div className="w-6 h-6 border-2 border-indigo-500/50 border-t-indigo-500 rounded-full animate-spin" />
-                <p>Waiting for dispatch to begin...</p>
+              <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-3 px-6 text-center">
+                {isTerminal ? (
+                  <>
+                    <AlertTriangle className="w-6 h-6 text-rose-400" />
+                    <p className="text-slate-300">
+                      {isHardFailure
+                        ? "Dispatch failed before any emails were sent."
+                        : "Dispatch finished with no recipient log entries."}
+                    </p>
+                    {(error_message || isHardFailure) && (
+                      <p className="text-xs text-rose-400/90 break-words max-w-md">
+                        {error_message || USER_DISPATCH_ERRORS.jobFailed}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="w-6 h-6 border-2 border-indigo-500/50 border-t-indigo-500 rounded-full animate-spin" />
+                    <p>Waiting for dispatch to begin...</p>
+                  </>
+                )}
               </div>
             ) : (
               <div className="space-y-1">
@@ -481,7 +677,7 @@ export default function DispatchPage() {
             className="rounded-2xl p-8 border border-white/10 bg-white/5 text-center relative overflow-hidden"
           >
             {/* Confetti (only on full success) */}
-            {failed === 0 && (
+            {isFullSuccess && (
               <div className="absolute inset-0 pointer-events-none overflow-hidden">
                 {Array.from({ length: 40 }).map((_, i) => (
                   <ConfettiParticle key={i} index={i} />
@@ -491,9 +687,9 @@ export default function DispatchPage() {
 
             <div className="relative z-10">
               <div className={`inline-flex items-center justify-center w-16 h-16 rounded-full mb-4 ${
-                failed === 0 ? "bg-emerald-500/10" : "bg-rose-500/10"
+                isFullSuccess ? "bg-emerald-500/10" : "bg-rose-500/10"
               }`}>
-                {failed === 0 ? (
+                {isFullSuccess ? (
                   <CheckCircle2 className="w-8 h-8 text-emerald-500" />
                 ) : (
                   <AlertTriangle className="w-8 h-8 text-rose-500" />
@@ -501,9 +697,9 @@ export default function DispatchPage() {
               </div>
               
               <h2 className="text-2xl font-bold mb-2">
-                {failed === 0
+                {isFullSuccess
                   ? "Dispatch Complete! 🎉"
-                  : sent === 0
+                  : isHardFailure
                     ? "Dispatch Failed"
                     : "Dispatch Complete with Errors"}
               </h2>
@@ -511,6 +707,11 @@ export default function DispatchPage() {
               <div className="text-slate-400 mb-4 space-y-1">
                 <p>{sent} emails sent successfully.</p>
                 {failed > 0 && <p className="text-rose-400">{failed} emails failed.</p>}
+                {(error_message || isHardFailure) && (
+                  <p className="text-rose-400 text-sm break-words max-w-xl mx-auto">
+                    {error_message || USER_DISPATCH_ERRORS.jobFailed}
+                  </p>
+                )}
               </div>
 
               <p className="text-xs text-slate-500 mb-8">

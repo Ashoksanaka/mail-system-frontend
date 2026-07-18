@@ -1,13 +1,17 @@
 // ──────────────────────────────────────────────────────────────
 // App Router — Bulk Email Dispatch Platform
 // ──────────────────────────────────────────────────────────────
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, Outlet } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import Layout from "./components/Layout";
 import { lazy, Suspense } from "react";
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
 import HomePage from "./pages/HomePage";
+import SignInPage from "./pages/SignInPage";
+import SignUpPage from "./pages/SignUpPage";
 import TemplatesPage from "./pages/TemplatesPage";
 import GenerateCSVPage from "./pages/GenerateCSVPage";
+import SettingsPage from "./pages/SettingsPage";
 
 const UploadCSVPage = lazy(() => import("./pages/UploadCSVPage"));
 const DispatchPage = lazy(() => import("./pages/DispatchPage"));
@@ -38,14 +42,23 @@ function AnimatedPage({ children }) {
   );
 }
 
+function AppShell() {
+  return (
+    <Layout>
+      <Outlet />
+    </Layout>
+  );
+}
+
 // ── App Component ─────────────────────────────────────────────
 function App() {
   const location = useLocation();
 
   return (
-    <Layout>
-      <AnimatePresence mode="wait">
-        <Routes location={location} key={location.pathname}>
+    <AnimatePresence mode="wait">
+      <Routes location={location} key={location.pathname}>
+        {/* Public routes with shared chrome */}
+        <Route element={<AppShell />}>
           <Route
             path="/"
             element={
@@ -55,46 +68,87 @@ function App() {
             }
           />
           <Route
-            path="/templates"
+            path="/sign-in/*"
             element={
               <AnimatedPage>
-                <TemplatesPage />
+                <SignInPage />
               </AnimatedPage>
             }
           />
           <Route
-            path="/generate-csv"
+            path="/sign-up/*"
             element={
               <AnimatedPage>
-                <GenerateCSVPage />
+                <SignUpPage />
               </AnimatedPage>
             }
           />
-          <Route
-            path="/upload-csv"
-            element={
-              <AnimatedPage>
-                <Suspense fallback={<div className="flex h-screen items-center justify-center text-slate-400">Loading Upload...</div>}>
-                  <UploadCSVPage />
-                </Suspense>
-              </AnimatedPage>
-            }
-          />
-          <Route
-            path="/dispatch"
-            element={
-              <AnimatedPage>
-                <Suspense fallback={<div className="flex h-screen items-center justify-center text-slate-400">Loading Dispatch...</div>}>
-                  <DispatchPage />
-                </Suspense>
-              </AnimatedPage>
-            }
-          />
-          {/* Catch-all: redirect unknown routes to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </AnimatePresence>
-    </Layout>
+
+          {/* Authenticated application routes */}
+          <Route element={<ProtectedRoute />}>
+            <Route
+              path="/templates"
+              element={
+                <AnimatedPage>
+                  <TemplatesPage />
+                </AnimatedPage>
+              }
+            />
+            <Route
+              path="/generate-csv"
+              element={
+                <AnimatedPage>
+                  <GenerateCSVPage />
+                </AnimatedPage>
+              }
+            />
+            <Route
+              path="/upload-csv"
+              element={
+                <AnimatedPage>
+                  <Suspense
+                    fallback={
+                      <div className="flex h-screen items-center justify-center text-slate-400">
+                        Loading Upload...
+                      </div>
+                    }
+                  >
+                    <UploadCSVPage />
+                  </Suspense>
+                </AnimatedPage>
+              }
+            />
+            <Route
+              path="/dispatch"
+              element={
+                <AnimatedPage>
+                  <Suspense
+                    fallback={
+                      <div className="flex h-screen items-center justify-center text-slate-400">
+                        Loading Dispatch...
+                      </div>
+                    }
+                  >
+                    <DispatchPage />
+                  </Suspense>
+                </AnimatedPage>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <AnimatedPage>
+                  <SettingsPage />
+                </AnimatedPage>
+              }
+            />
+          </Route>
+        </Route>
+
+        {/* Catch-all: redirect unknown routes to home */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </AnimatePresence>
   );
 }
 
